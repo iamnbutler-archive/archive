@@ -41,6 +41,8 @@ and archive-only.
 6. **Commit** the regenerated `INDEX.md` and `notes.json`:
    `git add INDEX.md notes.json && git commit -m "archive: <theme> (N repos)"`.
 
+If you edit the tool, run `./bin/selfcheck` before running anything for real.
+
 ## Triage rules
 
 **Archive freely:**

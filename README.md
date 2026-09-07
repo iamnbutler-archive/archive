@@ -81,6 +81,17 @@ The board binds to loopback only and shells out to `gh`. It stages into
 without making a change. After a successful move it repoints any local clone
 under `CODE_DIR` and regenerates `INDEX.md` — commit the result.
 
+## Checks
+
+```sh
+./bin/selfcheck
+```
+
+Structural only — syntax across all three languages, every `self._method` and
+every element id the board reaches for actually resolving, config completeness.
+No network. Run it after editing the tool; a missing method otherwise surfaces
+partway through a live run.
+
 ## Setup
 
 Requires [`gh`](https://cli.github.com) (authenticated) and `jq`.

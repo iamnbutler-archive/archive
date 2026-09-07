@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Cheap structural checks over the tool itself. No network, no GitHub calls.
+# Catches the class of mistake that only shows up mid-run otherwise.
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+fail=0
+step(){ printf '%-42s' "$1"; }
+pass(){ printf '✓\n'; }
+bad(){ printf '✗ %s\n' "$1"; fail=1; }
+
+step "bash syntax"
+bash -n bin/archive 2>/dev/null && pass || bad "bin/archive"
+
+step "python syntax"
+python3 -c "import ast;ast.parse(open('bin/archive-ui').read())" 2>/dev/null && pass || bad "bin/archive-ui"
+
+step "every self._method resolves"
+python3 - <<'PY' && pass || bad "unresolved method reference"
+import ast, sys
+tree = ast.parse(open('bin/archive-ui').read())
+bad = []
+for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+    defined = {n.name for n in cls.body if isinstance(n, ast.FunctionDef)}
+    assigned = {t.attr for a in ast.walk(cls) if isinstance(a, ast.Assign)
+                for t in a.targets if isinstance(t, ast.Attribute)}
+    for n in ast.walk(cls):
+        if (isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+                and n.value.id == "self" and n.attr.startswith("_")
+                and not n.attr.startswith("__")
+                and n.attr not in defined and n.attr not in assigned):
+            bad.append(f"{cls.name}.{n.attr} line {n.lineno}")
+sys.exit(1 if bad else 0) if not bad else (print(*bad, sep="\n"), sys.exit(1))
+PY
+
+step "board javascript parses"
+if command -v node >/dev/null; then
+  sed -n '/^<script>$/,/^<\/script>$/p' bin/ui.html | sed '1d;$d' > /tmp/.board.js
+  node --check /tmp/.board.js 2>/dev/null && pass || bad "ui.html <script>"
+else
+  printf '– node not installed\n'
+fi
+
+step "every id the board reaches for exists"
+python3 - <<'PY' && pass || bad "missing element id"
+import re, sys
+html = open('bin/ui.html').read()
+ids = set(re.findall(r'id="([\w-]+)"', html))
+js = html[html.index('<script>'):]
+want = set(re.findall(r"\$\('#([\w-]+)'\)", js))
+for side in ("keep", "arc", "del"):                 # el(side, what) -> #what-side
+    want |= {f"{w}-{side}" for w in re.findall(r"el\(\s*side\s*,\s*'(\w+)'\s*\)", js)}
+missing = sorted(want - ids)
+if missing: print(*missing, sep="\n")
+sys.exit(1 if missing else 0)
+PY
+
+step "config is complete"
+python3 - <<'PY' && pass || bad ".archiverc"
+import sys
+need = {"SOURCE_OWNER","ARCHIVE_OWNER","STALE_DAYS","CODE_DIR"}
+have = {l.split("=",1)[0].strip() for l in open(".archiverc")
+        if "=" in l and not l.strip().startswith("#")}
+sys.exit(0 if need <= have else 1)
+PY
+
+exit $fail

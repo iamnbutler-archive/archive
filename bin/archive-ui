@@ -168,6 +168,13 @@ def commits_ahead_of_upstream(full):
     return cmp.get("ahead_by") if cmp else None
 
 
+def _stars(repo, meta, full):
+    """The live count wins; the board's cache is only a fallback."""
+    if "stargazers_count" in full:
+        return full["stargazers_count"]
+    return meta.get("stargazerCount", 0)
+
+
 def delete_flags(repo, meta):
     """Reasons to stop before destroying a repo. A stricter bar than archiving,
     because there is no undo and no redirect."""
@@ -190,7 +197,7 @@ def delete_flags(repo, meta):
 
     # Stars on a clean fork are someone bookmarking a copy, not depending on it.
     # Everywhere else a single star is worth a beat.
-    stars = meta.get("stargazerCount", full.get("stargazers_count", 0))
+    stars = _stars(repo, meta, full)
     if stars >= (5 if clean_fork else 1):
         flags.append(f"{stars} star{'s' if stars != 1 else ''} — someone bookmarked this")
     if full.get("forks_count"):
@@ -225,16 +232,13 @@ def review_flags(repo, meta):
     if repo in PROTECTED:
         flags.append("protected repo — should stay on the main account")
 
-    if meta.get("stargazerCount", 0) >= 5:
-        flags.append(f"{meta['stargazerCount']} stars — archiving blocks new PRs")
-
-    full = gh_json(["api", f"repos/{SOURCE}/{repo}"], check=False)
-    if full:
-        if full.get("has_pages"):
-            site = full.get("homepage") or f"{SOURCE}.github.io/{repo}"
-            flags.append(f"serves GitHub Pages ({site}) — deploys stop running")
-        if full.get("fork") and full.get("parent"):
-            pass  # forks are safe; upstream is the real thing
+    full = gh_json(["api", f"repos/{SOURCE}/{repo}"], check=False) or {}
+    stars = _stars(repo, meta, full)
+    if stars >= 5:
+        flags.append(f"{stars} stars — archiving blocks new PRs")
+    if full.get("has_pages"):
+        site = full.get("homepage") or f"{SOURCE}.github.io/{repo}"
+        flags.append(f"serves GitHub Pages ({site}) — deploys stop running")
 
     flags += _shared_flags(repo)
     return flags
@@ -303,10 +307,23 @@ class Run:
         return True
 
     def _work(self):
+        try:
+            self._run_plan()
+        finally:                    # never strand the board in "Running…"
+            with self.lock:
+                self.active = False
+            self._reindex()
+            self.emit({"type": "done", "items": self.snapshot()})
+
+    def _run_plan(self):
         held = []
         for repo in self.order:
-            if self.items[repo]["state"] == "queued":
+            if self.items[repo]["state"] != "queued":
+                continue
+            try:
                 self._process(repo, held)
+            except Exception as e:  # a broken repo fails alone, not the batch
+                self.set_state(repo, "failed", note=f"{type(e).__name__}: {e}")
 
         # Second pass: held repos wait here for a decision from the board.
         while held:
@@ -322,11 +339,6 @@ class Run:
             else:
                 self.set_state(repo, "kept", note="kept after review")
 
-        with self.lock:
-            self.active = False
-        self._reindex()
-        self.emit({"type": "done", "items": self.snapshot()})
-
     def _process(self, repo, held):
         action = self.items[repo]["action"]
         self.set_state(repo, "checking")
@@ -340,6 +352,35 @@ class Run:
             self.set_state(repo, "held", flags=flags)
             return
         (self._delete if action == "delete" else self._transfer)(repo)
+
+    def _transfer(self, repo):
+        self.set_state(repo, "moving")
+        if repo in PROTECTED:
+            self.set_state(repo, "failed", note="refused: protected repo")
+            return
+        p = subprocess.run(
+            ["gh", "api", "-X", "POST", f"repos/{SOURCE}/{repo}/transfer",
+             "-f", f"new_owner={ARCHIVE}", "--silent"],
+            capture_output=True, text=True)
+        if p.returncode != 0:
+            err = (p.stderr or "").strip().splitlines()
+            self.set_state(repo, "failed", note=err[-1] if err else "transfer failed")
+            return
+
+        for _ in range(30):                     # transfers are asynchronous
+            if subprocess.run(["gh", "api", f"repos/{ARCHIVE}/{repo}"],
+                              capture_output=True).returncode == 0:
+                break
+            time.sleep(2)
+        else:
+            self.set_state(repo, "failed", note="transfer not visible after 60s")
+            return
+
+        subprocess.run(["gh", "api", "-X", "PATCH", f"repos/{ARCHIVE}/{repo}",
+                        "-F", "archived=true", "--silent"], capture_output=True)
+        self._write_note(repo)
+        self._repoint(repo)
+        self.set_state(repo, "moved", note=f"{ARCHIVE}/{repo}")
 
     def _delete(self, repo):
         self.set_state(repo, "deleting")
