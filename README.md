@@ -16,16 +16,52 @@ It is reversible.
 ./bin/archive ui        # http://127.0.0.1:8787
 ```
 
-Two columns — **Keep** on the left, **Archive** on the right — and `<` `>` to
-stage the end shape. Kept repos hold their ink; staged ones drain to grey, so
-the shape of the plan reads without labels. Arrow keys move the selection,
-shift and cmd extend it, `/` jumps to the filter.
+Three columns — **Keep**, **Archive**, **Delete** — and `<` `>` to stage the end
+shape. Kept repos hold their ink, archived ones drain to grey, and the delete
+column is hatched, because it is a chute rather than a place things live. Arrow
+keys move the selection, shift and cmd extend it, `/` jumps to the filter.
 
-Committing streams the transfers one repo at a time. Anything that trips a
+Filters take a small query language, so clearing out forks is one keystroke
+rather than twenty-two clicks:
+
+| Query | Matches |
+| --- | --- |
+| `is:fork` `is:source` | forks / your own repos |
+| `is:stale` | no push in `STALE_DAYS` |
+| `is:starred` `stars:>5` | by star count |
+| `is:public` `is:private` | by visibility |
+| `lang:rust` | by primary language |
+
+Anything else is a substring match on name and description, and terms combine.
+With a filter active, **select N** takes every match at once.
+
+Committing streams the plan one repo at a time, archives first — those are
+reversible, so they should not queue behind a delete waiting on a decision. Anything that trips a
 review rule — five or more stars, a live Pages site, open issues from someone
 else, a published package pointing back at it, a protected name — stops and
 waits in the **held** pile with its reasons, while the rest keep moving. Each
-held repo takes *Archive anyway* or *Keep it*.
+held repo takes *Archive anyway* or *Keep it*; a held delete also offers
+*Archive instead*.
+
+## Deleting
+
+Deletion is the one action with no undo and no redirect, so it is gated
+differently. It needs a scope the other commands do not:
+
+```sh
+gh auth refresh -h github.com -s delete_repo
+```
+
+The board disables the delete lane without it. Committing a plan that contains
+deletes requires typing the exact number first, and every delete is checked
+before it runs — a repo is held if it is not a fork, if the fork carries commits
+upstream does not have, if its upstream is gone, if it has forks or a Pages site
+of its own, or if anyone else has open issues on it. Stars hold a delete at 1,
+except on a clean fork where the bar is 5, since starring a copy of someone
+else's project is a bookmark rather than a dependency.
+
+There is deliberately no `delete` subcommand. Destroying a repo should take a
+human at the board, not a command an agent can reach for.
 
 The board binds to loopback only and shells out to `gh`. It stages into
 `plan.json`; nothing moves until you commit.

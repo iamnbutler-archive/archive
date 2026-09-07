@@ -11,7 +11,7 @@
 :root{
   --paper:#E9EAE6; --card:#FCFCFB; --card-arc:#E1E2DC;
   --ink:#16181D; --ink-2:#565A63; --taupe:#8B8577;
-  --ultra:#2C3E9E; --plum:#6E2F5B; --rule:#D3D4CD; --rule-2:#C2C3BB;
+  --ultra:#2C3E9E; --plum:#6E2F5B; --ox:#8E2A20; --rule:#D3D4CD; --rule-2:#C2C3BB;
   --sans:"Archivo",system-ui,-apple-system,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
   --r:3px;
@@ -39,6 +39,13 @@ button{font:inherit;color:inherit;border:none;background:none;cursor:pointer}
 .tally div{color:var(--ink-2)}
 .tally span{font-weight:600;color:var(--ink)}
 .tally .arc span{color:var(--taupe)}
+.tally .del span{color:var(--ox)}
+.scopewarn{
+  flex:none;padding:7px 20px;background:#F6E9E7;color:var(--ox);
+  font-family:var(--mono);font-size:11.5px;border-bottom:1px solid var(--rule-2);display:none;
+}
+.scopewarn.on{display:block}
+.scopewarn code{background:rgba(142,42,32,.1);padding:1px 5px;border-radius:2px}
 
 .commit{
   background:var(--ultra);color:#fff;font-weight:600;font-size:12px;
@@ -53,7 +60,8 @@ button{font:inherit;color:inherit;border:none;background:none;cursor:pointer}
 .bar i{display:block;height:100%;width:0;background:var(--ultra);transition:width .3s ease}
 
 /* ---------------------------------------------------------------- board */
-.board{flex:1;display:grid;grid-template-columns:1fr 52px 1fr;min-height:0}
+.board{flex:1;display:grid;grid-template-columns:1fr 46px 1fr 46px 1fr;min-height:0}
+@media (max-width:1100px){.board{grid-template-columns:1fr 40px 1fr 40px .8fr}}
 .col{display:flex;flex-direction:column;min-height:0;min-width:0}
 .col-head{
   flex:none;display:flex;align-items:baseline;gap:10px;
@@ -67,6 +75,21 @@ button{font:inherit;color:inherit;border:none;background:none;cursor:pointer}
 .keep .col-head h2{color:var(--ultra)}
 .arc  .col-head h2{color:var(--taupe)}
 .arc{background:color-mix(in srgb,var(--paper) 84%,#B9BAB2)}
+.del .col-head h2{color:var(--ox)}
+/* a chute, not a resting place — the hatch says this column does not keep things */
+.del{
+  background:
+    repeating-linear-gradient(-45deg, transparent 0 7px,
+      color-mix(in srgb,var(--ox) 6%,transparent) 7px 8px),
+    color-mix(in srgb,var(--paper) 78%,#B9BAB2);
+}
+.del .row{opacity:.9}
+.del .row .name,.del .row .facts,.del .row .desc{color:var(--taupe)}
+.del .row .name{text-decoration:underline;text-decoration-style:wavy;
+  text-decoration-color:color-mix(in srgb,var(--ox) 45%,transparent);text-underline-offset:3px}
+.del .row[aria-selected="true"]{opacity:1;border-color:var(--ox);background:var(--card-arc)}
+.del .row .star{color:var(--ox)}
+.del .find input{background:transparent}
 
 .find{flex:none;padding:9px 18px;border-bottom:1px solid var(--rule)}
 .find input{
@@ -74,7 +97,14 @@ button{font:inherit;color:inherit;border:none;background:none;cursor:pointer}
   padding:6px 9px;border:1px solid var(--rule-2);border-radius:var(--r);
   background:var(--card);
 }
+.find{display:flex;gap:7px;align-items:center}
 .find input::placeholder{color:var(--taupe)}
+.find .all{
+  flex:none;font-family:var(--mono);font-size:10.5px;font-weight:600;white-space:nowrap;
+  padding:6px 9px;border:1px solid var(--rule-2);border-radius:var(--r);color:var(--ink-2);
+}
+.find .all:hover{border-color:var(--ultra);color:var(--ultra)}
+.find .all[hidden]{display:none}
 .arc .find input{background:transparent}
 
 .list{flex:1;overflow-y:auto;padding:8px 10px 40px;scrollbar-width:thin}
@@ -132,11 +162,16 @@ button{font:inherit;color:inherit;border:none;background:none;cursor:pointer}
 .row[data-state="checking"] .chip{color:var(--ink-2)}
 .row[data-state="moving"]   .chip{color:var(--ultra)}
 .row[data-state="moved"]    .chip{color:var(--taupe)}
-.row[data-state="failed"]   .chip{color:#9B3126}
+.row[data-state="failed"]   .chip{color:var(--ox)}
+.row[data-state="deleting"] .chip{color:var(--ox)}
+.row[data-state="deleted"]  .chip{color:var(--ox)}
 .row[data-state="kept"]     .chip{color:var(--ultra)}
 .row[data-state="moving"]{background:var(--card);opacity:1}
 .row[data-state="moved"]{opacity:.5}
 .row[data-state="moved"] .name{text-decoration:line-through;text-decoration-color:var(--rule-2)}
+.row[data-state="deleting"]{background:var(--card);opacity:1}
+.row[data-state="deleted"]{opacity:.42}
+.row[data-state="deleted"] .name{text-decoration:line-through;text-decoration-color:var(--ox)}
 .row[data-state="failed"]{background:#F6E9E7;opacity:1}
 .row[data-state="failed"] .name,.row[data-state="failed"] .desc{color:#9B3126}
 @media (prefers-reduced-motion:no-preference){
@@ -162,6 +197,8 @@ button{font:inherit;color:inherit;border:none;background:none;cursor:pointer}
 }
 .hitem .acts .go{background:var(--plum);color:#fff;border-color:var(--plum)}
 .hitem .acts .no{color:var(--ultra);border-color:var(--ultra)}
+.hitem .acts .kill{background:var(--ox);color:#fff;border-color:var(--ox)}
+.hitem .acts .alt{color:var(--taupe)}
 
 /* --------------------------------------------------------------- dialog */
 dialog{
@@ -182,6 +219,9 @@ dialog::backdrop{background:rgba(22,24,29,.36)}
 .dlg .acts button{font-size:12px;font-weight:600;padding:8px 15px;border-radius:var(--r)}
 .dlg .acts .cancel{color:var(--ink-2)}
 .dlg .acts .ok{background:var(--ultra);color:#fff}
+.dlg .acts .ok:disabled{background:var(--rule-2);cursor:not-allowed}
+.dlg .acts .ok.kill{background:var(--ox)}
+#killwrap{margin-top:16px;padding-top:16px;border-top:1px solid var(--rule)}
 
 .empty{padding:26px 18px;font-size:12px;color:var(--taupe);font-family:var(--mono)}
 .loading{display:grid;place-items:center;height:100%;font-family:var(--mono);color:var(--taupe)}
@@ -195,39 +235,68 @@ dialog::backdrop{background:rgba(22,24,29,.36)}
   <div class="tally">
     <div>keep <span id="t-keep">0</span></div>
     <div class="arc">archive <span id="t-arc">0</span></div>
+    <div class="del">delete <span id="t-del">0</span></div>
   </div>
   <button class="commit" id="commit" disabled>Commit plan</button>
 </header>
 <div class="bar" id="bar"><i></i></div>
+<div class="scopewarn" id="scopewarn">
+  Deletes are disabled — this token has no <code>delete_repo</code> scope.
+  Run <code>gh auth refresh -h github.com -s delete_repo</code>, then reload.
+</div>
 
 <main class="board" id="board">
   <div class="loading">reading repos from github…</div>
 </main>
 
 <template id="tpl-board">
-  <section class="col keep">
+  <section class="col keep" data-side="keep">
     <div class="col-head">
       <h2>Keep</h2><span class="n" id="n-keep"></span>
       <span class="where" id="w-keep"></span>
     </div>
-    <div class="find"><input id="f-keep" type="search" placeholder="filter kept repos" aria-label="Filter kept repos"></div>
+    <div class="find">
+      <input id="f-keep" type="search" placeholder="filter · try is:fork" aria-label="Filter kept repos">
+      <button class="all" id="a-keep" hidden></button>
+    </div>
     <div class="list" id="l-keep" role="listbox" aria-multiselectable="true" tabindex="0"></div>
   </section>
 
   <div class="rail">
-    <button id="to-arc" title="Move selection to Archive (→)" aria-label="Move selection to Archive">›</button>
-    <button id="to-keep" title="Move selection to Keep (←)" aria-label="Move selection to Keep">‹</button>
-    <div class="hint">stage the end shape</div>
+    <button id="k-to-a" title="Move selection to Archive" aria-label="Move selection to Archive">›</button>
+    <button id="a-to-k" title="Move selection to Keep" aria-label="Move selection to Keep">‹</button>
+    <div class="hint">keep · archive</div>
   </div>
 
-  <section class="col arc">
+  <section class="col arc" data-side="arc">
     <div class="col-head">
       <h2>Archive</h2><span class="n" id="n-arc"></span>
       <span class="where" id="w-arc"></span>
     </div>
     <div class="held" id="held"></div>
-    <div class="find"><input id="f-arc" type="search" placeholder="filter repos to archive" aria-label="Filter repos to archive"></div>
+    <div class="find">
+      <input id="f-arc" type="search" placeholder="filter · try is:fork" aria-label="Filter repos to archive">
+      <button class="all" id="a-arc" hidden></button>
+    </div>
     <div class="list" id="l-arc" role="listbox" aria-multiselectable="true" tabindex="0"></div>
+  </section>
+
+  <div class="rail">
+    <button id="a-to-d" title="Move selection to Delete" aria-label="Move selection to Delete">›</button>
+    <button id="d-to-a" title="Move selection to Archive" aria-label="Move selection back to Archive">‹</button>
+    <div class="hint">archive · delete</div>
+  </div>
+
+  <section class="col del" data-side="del">
+    <div class="col-head">
+      <h2>Delete</h2><span class="n" id="n-del"></span>
+      <span class="where">gone for good</span>
+    </div>
+    <div class="find">
+      <input id="f-del" type="search" placeholder="filter" aria-label="Filter repos to delete">
+      <button class="all" id="a-del" hidden></button>
+    </div>
+    <div class="list" id="l-del" role="listbox" aria-multiselectable="true" tabindex="0"></div>
   </section>
 </template>
 
@@ -237,6 +306,10 @@ dialog::backdrop{background:rgba(22,24,29,.36)}
     <p id="dlg-body"></p>
     <label for="reason">Why these are being archived</label>
     <input id="reason" name="reason" placeholder="2013–2016 coursework" autocomplete="off">
+    <div id="killwrap" hidden>
+      <label for="killcount">Type the number of repos to delete for good</label>
+      <input id="killcount" inputmode="numeric" autocomplete="off" placeholder="0">
+    </div>
     <div class="acts">
       <button class="cancel" value="cancel" type="submit">Cancel</button>
       <button class="ok" value="go" type="submit">Start moving</button>
@@ -246,14 +319,16 @@ dialog::backdrop{background:rgba(22,24,29,.36)}
 
 <script>
 const $ = s => document.querySelector(s);
-let S = null;                       // server state
-let meta = {};                      // repo -> repo metadata
-let keep = [], arc = [];            // staged plan, arrays of repo names
-let sel = {keep:new Set(), arc:new Set()};
-let lastClick = {keep:null, arc:null};
-let run = {active:false, items:{}}; // live run status
+const SIDES = ['keep','arc','del'];
+
+let S = null, meta = {}, staleCut = '';
+let lane = {keep:[], arc:[], del:[]};
+let sel  = {keep:new Set(), arc:new Set(), del:new Set()};
+let lastClick = {keep:null, arc:null, del:null};
+let run = {active:false, items:{}};
 
 const RUNNING = () => run.active;
+const el = (side, what) => $(`#${what}-${side}`);
 
 // ---------------------------------------------------------------- loading
 async function boot(){
@@ -261,12 +336,17 @@ async function boot(){
   meta = Object.fromEntries(S.repos.map(r => [r.name, r]));
   $('#r-src').textContent = '@' + S.source;
   $('#r-arc').textContent = '@' + S.archive;
+  $('#scopewarn').classList.toggle('on', !S.canDelete);
+
+  const cut = new Date(Date.now() - S.staleDays*864e5);
+  staleCut = cut.toISOString();
 
   const names = S.repos.map(r => r.name);
-  const planned = new Set([...(S.plan.keep||[]), ...(S.plan.archive||[])]);
-  arc  = (S.plan.archive||[]).filter(n => names.includes(n));
-  keep = (S.plan.keep||[]).filter(n => names.includes(n))
-           .concat(names.filter(n => !planned.has(n)));
+  const has = n => names.includes(n);
+  lane.arc = (S.plan.archive||[]).filter(has);
+  lane.del = (S.plan.delete ||[]).filter(has);
+  const claimed = new Set([...lane.arc, ...lane.del, ...(S.plan.keep||[])]);
+  lane.keep = (S.plan.keep||[]).filter(has).concat(names.filter(n => !claimed.has(n)));
 
   $('#board').replaceChildren($('#tpl-board').content.cloneNode(true));
   wire();
@@ -274,12 +354,40 @@ async function boot(){
   listen();
 }
 
-// ---------------------------------------------------------------- render
-const byPush = (a,b) => (meta[a].pushedAt||'') < (meta[b].pushedAt||'') ? -1 : 1;
+// ---------------------------------------------------------------- filter
+// A small query language, because "delete a bunch of forks" should be one
+// keystroke away rather than 22 clicks.
+function match(name, q){
+  if (!q) return true;
+  const m = meta[name];
+  return q.toLowerCase().split(/\s+/).filter(Boolean).every(t => {
+    switch (t){
+      case 'is:fork':    return m.isFork;
+      case 'is:source':  return !m.isFork;
+      case 'is:private': return m.isPrivate;
+      case 'is:public':  return !m.isPrivate;
+      case 'is:stale':   return (m.pushedAt||'') < staleCut;
+      case 'is:starred': return m.stargazerCount > 0;
+    }
+    let x;
+    if ((x = t.match(/^stars:(>=|<=|>|<)?(\d+)$/))){
+      const v = m.stargazerCount, k = +x[2];
+      return {'>':v>k,'<':v<k,'>=':v>=k,'<=':v<=k}[x[1]] ?? v === k;
+    }
+    if ((x = t.match(/^lang:(.+)$/)))
+      return (m.primaryLanguage?.name||'').toLowerCase().includes(x[1]);
+    return name.toLowerCase().includes(t) ||
+           (m.description||'').toLowerCase().includes(t);
+  });
+}
 
+const byPush = (a,b) => (meta[a].pushedAt||'') < (meta[b].pushedAt||'') ? -1 : 1;
+const shownIn = side =>
+  lane[side].slice().sort(byPush).filter(n => match(n, el(side,'f').value.trim()));
+
+// ---------------------------------------------------------------- render
 function row(name, side){
-  const m = meta[name], d = document.createElement('div');
-  const st = run.items[name];
+  const m = meta[name], st = run.items[name], d = document.createElement('div');
   d.className = 'row';
   d.dataset.name = name;
   d.setAttribute('role','option');
@@ -297,66 +405,70 @@ function row(name, side){
     (st ? `<div class="chip">${st.state}</div>`
         : `<div class="facts">${facts.join(' · ')}</div>`) +
     `<div class="desc">${st && st.note ? st.note : (m.description||'')}</div>`;
-
   d.addEventListener('click', e => pick(e, name, side));
   return d;
 }
 
 function paint(side){
-  const list = side === 'keep' ? keep : arc;
-  const el = side === 'keep' ? $('#l-keep') : $('#l-arc');
-  const q = (side === 'keep' ? $('#f-keep') : $('#f-arc')).value.trim().toLowerCase();
-  const shown = list.slice().sort(byPush)
-    .filter(n => !q || n.toLowerCase().includes(q) ||
-                 (meta[n].description||'').toLowerCase().includes(q));
-  el.replaceChildren(...shown.map(n => row(n, side)));
+  const q = el(side,'f').value.trim();
+  const shown = shownIn(side);
+  const list = el(side,'l');
+  list.replaceChildren(...shown.map(n => row(n, side)));
   if (!shown.length){
     const e = document.createElement('div');
     e.className = 'empty';
     e.textContent = q ? 'nothing matches' : 'empty';
-    el.append(e);
+    list.append(e);
   }
-  const n = side === 'keep' ? '#n-keep' : '#n-arc';
-  $(n).textContent = q ? `${shown.length}/${list.length}` : list.length;
+  el(side,'n').textContent = q ? `${shown.length}/${lane[side].length}` : lane[side].length;
+  const all = el(side,'a');
+  all.hidden = !q || !shown.length;
+  all.textContent = `select ${shown.length}`;
 }
 
 function render(){
-  paint('keep'); paint('arc');
-  $('#t-keep').textContent = keep.length;
-  $('#t-arc').textContent = arc.length;
+  SIDES.forEach(paint);
+  $('#t-keep').textContent = lane.keep.length;
+  $('#t-arc').textContent  = lane.arc.length;
+  $('#t-del').textContent  = lane.del.length;
   $('#w-keep').textContent = '@' + S.source;
-  $('#w-arc').textContent = '@' + S.archive;
-  $('#to-arc').disabled = RUNNING() || !sel.keep.size;
-  $('#to-keep').disabled = RUNNING() || !sel.arc.size;
-  const c = $('#commit');
-  c.disabled = RUNNING() || !arc.length;
-  c.textContent = RUNNING() ? 'Moving…' : `Commit plan · ${arc.length}`;
+  $('#w-arc').textContent  = '@' + S.archive;
+
+  $('#k-to-a').disabled = RUNNING() || !sel.keep.size;
+  $('#a-to-k').disabled = RUNNING() || !sel.arc.size;
+  $('#a-to-d').disabled = RUNNING() || !sel.arc.size || !S.canDelete;
+  $('#d-to-a').disabled = RUNNING() || !sel.del.size;
+
+  const c = $('#commit'), n = lane.arc.length + lane.del.length;
+  c.disabled = RUNNING() || !n;
+  c.classList.toggle('stop', !RUNNING() && lane.del.length > 0);
+  c.textContent = RUNNING() ? 'Running…' : `Commit plan · ${n}`;
   savePlan();
 }
 
 // ------------------------------------------------------------- selection
 function pick(e, name, side){
   if (RUNNING()) return;
-  const list = (side==='keep'?keep:arc).slice().sort(byPush);
-  const s = sel[side];
-  if (e.shiftKey && lastClick[side]){
-    const a = list.indexOf(lastClick[side]), b = list.indexOf(name);
-    list.slice(Math.min(a,b), Math.max(a,b)+1).forEach(n => s.add(n));
+  const shown = shownIn(side), s = sel[side];
+  if (e.shiftKey && lastClick[side] && shown.includes(lastClick[side])){
+    const a = shown.indexOf(lastClick[side]), b = shown.indexOf(name);
+    shown.slice(Math.min(a,b), Math.max(a,b)+1).forEach(n => s.add(n));
   } else if (e.metaKey || e.ctrlKey){
     s.has(name) ? s.delete(name) : s.add(name);
   } else {
-    s.clear(); s.add(name);
+    SIDES.forEach(k => sel[k].clear());
+    s.add(name);
   }
   lastClick[side] = name;
   render();
 }
 
-function shift(from){
-  const to = from === 'keep' ? 'arc' : 'keep';
+function shift(from, to){
   const moving = [...sel[from]];
-  if (!moving.length) return;
-  if (from === 'keep') { keep = keep.filter(n=>!sel.keep.has(n)); arc = arc.concat(moving); }
-  else                 { arc  = arc.filter(n=>!sel.arc.has(n));   keep = keep.concat(moving); }
+  if (!moving.length || RUNNING()) return;
+  if (to === 'del' && !S.canDelete) return;
+  lane[from] = lane[from].filter(n => !sel[from].has(n));
+  lane[to]   = lane[to].concat(moving);
   sel[from].clear();
   sel[to] = new Set(moving);
   render();
@@ -367,44 +479,71 @@ function savePlan(){
   clearTimeout(saveT);
   saveT = setTimeout(() => fetch('/api/plan', {method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({keep, archive: arc})}), 400);
+    body: JSON.stringify({keep:lane.keep, archive:lane.arc, delete:lane.del})}), 400);
 }
 
 // ------------------------------------------------------------------ wire
 function wire(){
-  $('#to-arc').onclick  = () => shift('keep');
-  $('#to-keep').onclick = () => shift('arc');
-  $('#f-keep').oninput  = () => paint('keep');
-  $('#f-arc').oninput   = () => paint('arc');
-  $('#commit').onclick  = commit;
+  $('#k-to-a').onclick = () => shift('keep','arc');
+  $('#a-to-k').onclick = () => shift('arc','keep');
+  $('#a-to-d').onclick = () => shift('arc','del');
+  $('#d-to-a').onclick = () => shift('del','arc');
+  $('#commit').onclick = commit;
+
+  SIDES.forEach(side => {
+    el(side,'f').oninput = () => paint(side);
+    el(side,'a').onclick = () => {
+      SIDES.forEach(k => sel[k].clear());
+      shownIn(side).forEach(n => sel[side].add(n));
+      lastClick[side] = null;
+      render();
+    };
+  });
 
   document.addEventListener('keydown', e => {
-    if (e.target.tagName === 'INPUT') { if (e.key === 'Escape') e.target.blur(); return; }
+    if (e.target.tagName === 'INPUT'){ if (e.key === 'Escape') e.target.blur(); return; }
     if (RUNNING()) return;
-    if (e.key === '/'){ e.preventDefault(); $('#f-keep').focus(); }
-    if (e.key === 'ArrowRight' || e.key === '>') shift('keep');
-    if (e.key === 'ArrowLeft'  || e.key === '<') shift('arc');
+    if (e.key === '/'){ e.preventDefault(); $('#f-keep').focus(); return; }
+    const active = SIDES.find(k => sel[k].size);
+    if (!active) return;
+    const i = SIDES.indexOf(active);
+    if (e.key === 'ArrowRight' && i < 2) shift(active, SIDES[i+1]);
+    if (e.key === 'ArrowLeft'  && i > 0) shift(active, SIDES[i-1]);
   });
 }
 
 // -------------------------------------------------------------- commit
-async function commit(){
-  const protectedHits = arc.filter(n => S.protected.includes(n));
+function commit(){
+  const dlg = $('#dlg'), kill = lane.del.length, ok = dlg.querySelector('.ok');
+  const blocked = [...lane.arc, ...lane.del].filter(n => S.protected.includes(n));
+
   $('#dlg-body').textContent =
-    `${arc.length} repos transfer to @${S.archive} and become read-only. Their ` +
-    `old URLs keep redirecting, and anything that trips a review rule stops for ` +
-    `your call instead of moving.` +
-    (protectedHits.length ? ` ${protectedHits.join(', ')} will be refused.` : '');
-  $('#dlg').showModal();
-  $('#reason').focus();
-  $('#dlg').addEventListener('close', async function once(){
-    $('#dlg').removeEventListener('close', once);
-    if ($('#dlg').returnValue !== 'go') return;
+    `${lane.arc.length} repos transfer to @${S.archive} and become read-only — ` +
+    `old URLs keep redirecting, and that is reversible. ` +
+    (kill ? `${kill} are deleted outright, which is not. ` : '') +
+    `Anything that trips a review rule stops for your call instead of running.` +
+    (blocked.length ? ` ${blocked.join(', ')} will be refused.` : '');
+
+  $('#killwrap').hidden = !kill;
+  ok.classList.toggle('kill', kill > 0);
+  ok.textContent = kill ? `Archive ${lane.arc.length}, delete ${kill}` : 'Start moving';
+  const count = $('#killcount');
+  count.value = '';
+  ok.disabled = kill > 0;
+  count.oninput = () => { ok.disabled = count.value.trim() !== String(kill); };
+
+  dlg.showModal();
+  (kill ? count : $('#reason')).focus();
+
+  dlg.addEventListener('close', async function once(){
+    dlg.removeEventListener('close', once);
+    if (dlg.returnValue !== 'go') return;
     run.active = true;
     $('#bar').classList.add('on');
     render();
     await fetch('/api/run', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({archive: arc, reason: $('#reason').value.trim()})});
+      body: JSON.stringify({archive:lane.arc, delete:lane.del,
+                            reason:$('#reason').value.trim()})});
   });
 }
 
@@ -425,11 +564,11 @@ function listen(){
 
 function sync(){
   const items = Object.values(run.items);
-  const done = items.filter(i => ['moved','failed','kept'].includes(i.state)).length;
+  const done = items.filter(i => ['moved','deleted','failed','kept'].includes(i.state)).length;
   if (items.length) $('#bar').firstElementChild.style.width = (done/items.length*100)+'%';
-
   const held = items.filter(i => i.state === 'held');
-  $('#held').replaceChildren(...(held.length ? [heldHead(held.length), ...held.map(heldItem)] : []));
+  $('#held').replaceChildren(...(held.length
+    ? [heldHead(held.length), ...held.map(heldItem)] : []));
   render();
 }
 
@@ -444,22 +583,35 @@ function heldItem(i){
   const d = document.createElement('div');
   d.className = 'hitem';
   d.innerHTML = `<div class="name">${i.repo}</div><ul>` +
-    i.flags.map(f => `<li>${f}</li>`).join('') + `</ul>`;
+    i.flags.map(f => `<li>${f}</li>`).join('') + '</ul>';
   const acts = document.createElement('div');
   acts.className = 'acts';
-  const go = document.createElement('button');
-  go.className = 'go'; go.textContent = 'Archive anyway';
-  go.onclick = () => decide(i.repo, 'archive');
-  const no = document.createElement('button');
-  no.className = 'no'; no.textContent = 'Keep it';
-  no.onclick = () => decide(i.repo, 'keep');
-  acts.append(go, no);
+
+  const btn = (cls, text, action) => {
+    const b = document.createElement('button');
+    b.className = cls; b.textContent = text;
+    b.onclick = () => decide(i.repo, action);
+    return b;
+  };
+
+  if (i.action === 'delete'){
+    acts.append(btn('kill','Delete anyway','delete'),
+                btn('alt','Archive instead','archive'),
+                btn('no','Keep it','keep'));
+  } else {
+    acts.append(btn('go','Archive anyway','archive'),
+                btn('no','Keep it','keep'));
+  }
   d.append(acts);
   return d;
 }
 
 function decide(repo, action){
-  if (action === 'keep'){ arc = arc.filter(n => n !== repo); keep.push(repo); }
+  if (action === 'keep'){
+    lane.arc = lane.arc.filter(n => n !== repo);
+    lane.del = lane.del.filter(n => n !== repo);
+    if (!lane.keep.includes(repo)) lane.keep.push(repo);
+  }
   fetch('/api/decide', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({repo, action})});
 }

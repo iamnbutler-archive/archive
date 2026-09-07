@@ -77,6 +77,14 @@ def gh_json(args, check=True):
     return json.loads(out) if out.strip() else None
 
 
+def token_scopes():
+    out = subprocess.run(["gh", "api", "-i", "user"], capture_output=True, text=True).stdout
+    for line in out.replace("\r", "").splitlines():
+        if line.lower().startswith("x-oauth-scopes:"):
+            return {p.strip() for p in line.split(":", 1)[1].split(",") if p.strip()}
+    return set()
+
+
 def list_repos(owner):
     fields = ("name,description,isPrivate,isFork,isArchived,stargazerCount,"
               "forkCount,pushedAt,primaryLanguage,diskUsage")
@@ -149,6 +157,68 @@ def published_to_registry(repo):
     return None
 
 
+def commits_ahead_of_upstream(full):
+    """How many commits this fork carries that upstream does not."""
+    parent = full.get("parent")
+    if not parent:
+        return None
+    cmp = gh_json(["api", "repos/{}/compare/{}...{}:{}".format(
+        parent["full_name"], parent.get("default_branch", "main"),
+        SOURCE, full.get("default_branch", "main"))], check=False)
+    return cmp.get("ahead_by") if cmp else None
+
+
+def delete_flags(repo, meta):
+    """Reasons to stop before destroying a repo. A stricter bar than archiving,
+    because there is no undo and no redirect."""
+    flags = []
+    if repo in PROTECTED:
+        flags.append("protected repo — never delete this one")
+
+    full = gh_json(["api", f"repos/{SOURCE}/{repo}"], check=False) or {}
+    is_fork = bool(full.get("fork"))
+    ahead = commits_ahead_of_upstream(full) if is_fork else None
+    clean_fork = is_fork and ahead == 0
+
+    if not is_fork:
+        flags.append("not a fork — deleting destroys the only copy")
+    elif ahead:
+        flags.append(f"{ahead} commit{'s' if ahead != 1 else ''} of your own that "
+                     f"upstream does not have — they die with the repo")
+    elif ahead is None:
+        flags.append("upstream is gone, so this fork is the only copy left")
+
+    # Stars on a clean fork are someone bookmarking a copy, not depending on it.
+    # Everywhere else a single star is worth a beat.
+    stars = meta.get("stargazerCount", full.get("stargazers_count", 0))
+    if stars >= (5 if clean_fork else 1):
+        flags.append(f"{stars} star{'s' if stars != 1 else ''} — someone bookmarked this")
+    if full.get("forks_count"):
+        flags.append(f"{full['forks_count']} fork(s) of it — deleting orphans them")
+    if full.get("has_pages"):
+        flags.append("serves GitHub Pages — the site goes down for good")
+
+    flags += _shared_flags(repo)
+    return flags
+
+
+def _shared_flags(repo):
+    """Checks that apply to archiving and deleting alike."""
+    out = []
+    issues = gh_json(["api", f"repos/{SOURCE}/{repo}/issues",
+                      "--method", "GET", "-f", "state=open", "-f", "per_page=30"],
+                     check=False) or []
+    others = {i["user"]["login"] for i in issues
+              if i.get("user", {}).get("login", "").lower() != SOURCE.lower()
+              and not i.get("user", {}).get("login", "").endswith("[bot]")}
+    if others:
+        out.append(f"open issues/PRs from {', '.join(sorted(others)[:3])}")
+    pub = published_to_registry(repo)
+    if pub:
+        out.append(pub + " — the repo link is the package's homepage")
+    return out
+
+
 def review_flags(repo, meta):
     """Reasons a human should look before this one moves. Empty means go."""
     flags = []
@@ -166,20 +236,7 @@ def review_flags(repo, meta):
         if full.get("fork") and full.get("parent"):
             pass  # forks are safe; upstream is the real thing
 
-    issues = gh_json(["api", f"repos/{SOURCE}/{repo}/issues",
-                      "--method", "GET", "-f", "state=open", "-f", "per_page=30"],
-                     check=False) or []
-    others = {i["user"]["login"] for i in issues
-              if i.get("user", {}).get("login", "").lower() != SOURCE.lower()
-              and not i.get("user", {}).get("login", "").endswith("[bot]")}
-    if others:
-        who = ", ".join(sorted(others)[:3])
-        flags.append(f"open issues/PRs from {who} — archiving freezes them")
-
-    pub = published_to_registry(repo)
-    if pub:
-        flags.append(pub + " — the repo link is the crate's homepage")
-
+    flags += _shared_flags(repo)
     return flags
 
 
@@ -229,13 +286,17 @@ class Run:
         self.emit({"type": "item", "item": payload})
 
     # -- the run itself --
-    def start(self, repos, reason):
+    def start(self, plan, reason):
+        """plan: list of (repo, action) where action is 'archive' or 'delete'.
+        Archives run first — they are reversible, so they should not be blocked
+        behind a delete waiting on a decision."""
         if self.active:
             return False
+        plan = sorted(plan, key=lambda ra: ra[1] != "archive")
         self.reason = reason
-        self.order = list(repos)
-        self.items = {r: {"state": "queued", "flags": [], "note": ""}
-                      for r in repos}
+        self.order = [r for r, _ in plan]
+        self.items = {r: {"state": "queued", "action": a, "flags": [], "note": ""}
+                      for r, a in plan}
         self.active = True
         self.thread = threading.Thread(target=self._work, daemon=True)
         self.thread.start()
@@ -244,11 +305,10 @@ class Run:
     def _work(self):
         held = []
         for repo in self.order:
-            if self.items[repo]["state"] != "queued":
-                continue
-            self._process(repo, held)
+            if self.items[repo]["state"] == "queued":
+                self._process(repo, held)
 
-        # Second pass: anything held waits here for a decision from the board.
+        # Second pass: held repos wait here for a decision from the board.
         while held:
             self.emit({"type": "awaiting", "count": len(held)})
             repo, action = self.decisions.get()
@@ -257,6 +317,8 @@ class Run:
             held.remove(repo)
             if action == "archive":
                 self._transfer(repo)
+            elif action == "delete":
+                self._delete(repo)
             else:
                 self.set_state(repo, "kept", note="kept after review")
 
@@ -266,45 +328,36 @@ class Run:
         self.emit({"type": "done", "items": self.snapshot()})
 
     def _process(self, repo, held):
+        action = self.items[repo]["action"]
         self.set_state(repo, "checking")
+        check = delete_flags if action == "delete" else review_flags
         try:
-            flags = review_flags(repo, self.meta.get(repo, {}))
-        except Exception as e:                       # a check failing is itself
+            flags = check(repo, self.meta.get(repo, {}))
+        except Exception as e:
             flags = [f"could not complete review checks: {e}"]
         if flags:
             held.append(repo)
             self.set_state(repo, "held", flags=flags)
             return
-        self._transfer(repo)
+        (self._delete if action == "delete" else self._transfer)(repo)
 
-    def _transfer(self, repo):
-        self.set_state(repo, "moving")
+    def _delete(self, repo):
+        self.set_state(repo, "deleting")
         if repo in PROTECTED:
             self.set_state(repo, "failed", note="refused: protected repo")
             return
-        p = subprocess.run(
-            ["gh", "api", "-X", "POST", f"repos/{SOURCE}/{repo}/transfer",
-             "-f", f"new_owner={ARCHIVE}", "--silent"],
-            capture_output=True, text=True)
+        if "delete_repo" not in token_scopes():
+            self.set_state(repo, "failed",
+                           note="token lacks delete_repo — run: gh auth refresh "
+                                "-h github.com -s delete_repo")
+            return
+        p = subprocess.run(["gh", "api", "-X", "DELETE", f"repos/{SOURCE}/{repo}",
+                            "--silent"], capture_output=True, text=True)
         if p.returncode != 0:
             err = (p.stderr or "").strip().splitlines()
-            self.set_state(repo, "failed", note=err[-1] if err else "transfer failed")
+            self.set_state(repo, "failed", note=err[-1] if err else "delete failed")
             return
-
-        for _ in range(30):                     # transfers are asynchronous
-            if subprocess.run(["gh", "api", f"repos/{ARCHIVE}/{repo}"],
-                              capture_output=True).returncode == 0:
-                break
-            time.sleep(2)
-        else:
-            self.set_state(repo, "failed", note="transfer not visible after 60s")
-            return
-
-        subprocess.run(["gh", "api", "-X", "PATCH", f"repos/{ARCHIVE}/{repo}",
-                        "-F", "archived=true", "--silent"], capture_output=True)
-        self._write_note(repo)
-        self._repoint(repo)
-        self.set_state(repo, "moved", note=f"{ARCHIVE}/{repo}")
+        self.set_state(repo, "deleted", note="gone for good")
 
     def _write_note(self, repo):
         notes = {}
@@ -374,8 +427,10 @@ class Handler(BaseHTTPRequestHandler):
             PLAN_PATH.write_text(json.dumps(body, indent=2) + "\n")
             return self._send(200, json.dumps({"ok": True}))
         if self.path == "/api/run":
-            repos = [r for r in body.get("archive", []) if r not in PROTECTED]
-            ok = RUN.start(repos, body.get("reason", ""))
+            plan = ([(r, "archive") for r in body.get("archive", [])] +
+                    [(r, "delete") for r in body.get("delete", [])])
+            plan = [(r, a) for r, a in plan if r not in PROTECTED]
+            ok = RUN.start(plan, body.get("reason", ""))
             return self._send(200 if ok else 409, json.dumps({"ok": ok}))
         if self.path == "/api/decide":
             RUN.decide(body["repo"], body["action"])
@@ -399,6 +454,7 @@ class Handler(BaseHTTPRequestHandler):
             "repos": repos,
             "plan": plan,
             "running": RUN.active,
+            "canDelete": "delete_repo" in token_scopes(),
         }
 
     def events(self):

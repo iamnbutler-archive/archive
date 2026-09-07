@@ -17,9 +17,12 @@ becomes read-only and stops appearing on the main profile. That is the point.
 
 ## Two ways in
 
-`./bin/archive ui` opens a staging board for a human to shape a plan directly.
-Use it when Nate wants to drive. Everything below is the agent path — same rules,
-same review checks, run from the terminal.
+`./bin/archive ui` opens a staging board for a human to shape a plan directly:
+three lanes (keep / archive / delete), filter queries like `is:fork`, and a
+review gate on every repo before it moves. Use it when Nate wants to drive.
+
+Everything below is the agent path — same review rules, run from the terminal,
+and archive-only.
 
 ## Workflow
 
@@ -87,7 +90,9 @@ cannot finish, report what happened and leave the repo where it is.
 
 ## Things not to do
 
-- Do not delete repos. Ever. Archiving exists so deletion is never the answer.
+- **Do not delete repos.** The board has a delete lane and Nate uses it; you do
+  not. There is no `delete` subcommand for exactly this reason. If a repo looks
+  like it should be destroyed rather than archived, say so and leave it staged.
 - Do not archive in bulk without a per-batch human yes, even if the list is
   obviously stale.
 - Do not hand-edit `INDEX.md` — it is regenerated from the org by
