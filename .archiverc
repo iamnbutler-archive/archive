@@ -1,0 +1,13 @@
+# Config for bin/archive. Override any of these with env vars.
+
+# Account whose repos get archived (the account being cleaned up).
+SOURCE_OWNER=iamnbutler
+
+# Org that receives archived repos.
+ARCHIVE_OWNER=iamnbutler-archive
+
+# A repo is a "candidate" once it has had no pushes for this many days.
+STALE_DAYS=365
+
+# Where local clones live, so `move` can repoint git remotes after a transfer.
+CODE_DIR=/Users/natebutler/Code

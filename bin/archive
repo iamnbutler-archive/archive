@@ -1,0 +1,389 @@
+#!/usr/bin/env bash
+#
+# archive — move stale repos out of a personal account into an archive org.
+#
+# Transfers preserve history, issues, stars, and leave a permanent redirect
+# at the old URL, so nothing breaks and nothing is lost. After the transfer
+# the repo is flagged read-only archived.
+#
+# Usage: archive <command> [args]   (run `archive help` for the full list)
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NOTES="$ROOT/notes.json"
+INDEX="$ROOT/INDEX.md"
+
+# ---------------------------------------------------------------- config ----
+
+# shellcheck disable=SC1091
+[[ -f "$ROOT/.archiverc" ]] && source "$ROOT/.archiverc"
+SOURCE_OWNER="${SOURCE_OWNER:-}"
+ARCHIVE_OWNER="${ARCHIVE_OWNER:-}"
+STALE_DAYS="${STALE_DAYS:-365}"
+CODE_DIR="${CODE_DIR:-$HOME/Code}"
+
+DRY_RUN=0
+ASSUME_YES=0
+
+# ----------------------------------------------------------------- utils ----
+
+if [[ -t 1 ]]; then
+  BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; GRN=$'\033[32m'
+  YEL=$'\033[33m'; RST=$'\033[0m'
+else
+  BOLD=""; DIM=""; RED=""; GRN=""; YEL=""; RST=""
+fi
+
+say()  { printf '%s\n' "$*"; }
+info() { printf '%s\n' "${DIM}$*${RST}"; }
+ok()   { printf '%s\n' "${GRN}✓${RST} $*"; }
+warn() { printf '%s\n' "${YEL}!${RST} $*" >&2; }
+die()  { printf '%s\n' "${RED}✗${RST} $*" >&2; exit 1; }
+
+run() {
+  if (( DRY_RUN )); then
+    printf '%s\n' "${DIM}would run:${RST} $*"
+    return 0
+  fi
+  "$@"
+}
+
+confirm() {
+  (( ASSUME_YES )) && return 0
+  local reply
+  read -r -p "$1 [y/N] " reply </dev/tty
+  [[ "$reply" == [yY] || "$reply" == [yY][eE][sS] ]]
+}
+
+require_deps() {
+  command -v gh  >/dev/null || die "gh is not installed (brew install gh)"
+  command -v jq  >/dev/null || die "jq is not installed (brew install jq)"
+  gh auth status >/dev/null 2>&1 || die "gh is not authenticated (gh auth login)"
+  [[ -n "$SOURCE_OWNER"  ]] || die "SOURCE_OWNER is not set (see .archiverc)"
+  [[ -n "$ARCHIVE_OWNER" ]] || die "ARCHIVE_OWNER is not set (see .archiverc)"
+}
+
+# Every repo field the tool needs, for one owner, as a JSON array.
+fetch_repos() {
+  local owner="$1"
+  gh repo list "$owner" --limit 1000 --json \
+    name,description,isPrivate,isFork,isArchived,stargazerCount,forkCount,pushedAt,primaryLanguage,diskUsage,url
+}
+
+read_note() { # repo -> reason, or empty
+  [[ -f "$NOTES" ]] || { echo ""; return; }
+  jq -r --arg r "$1" '.[$r].reason // ""' "$NOTES"
+}
+
+write_note() { # repo reason
+  local repo="$1" reason="$2" tmp
+  [[ -f "$NOTES" ]] || echo '{}' > "$NOTES"
+  tmp="$(mktemp)"
+  jq --arg r "$repo" --arg reason "$reason" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     '.[$r] = {reason: $reason, archived_at: $at}' "$NOTES" > "$tmp"
+  mv "$tmp" "$NOTES"
+}
+
+drop_note() {
+  [[ -f "$NOTES" ]] || return 0
+  local tmp; tmp="$(mktemp)"
+  jq --arg r "$1" 'del(.[$r])' "$NOTES" > "$tmp"
+  mv "$tmp" "$NOTES"
+}
+
+# ------------------------------------------------------------- cmd: check ----
+
+cmd_check() {
+  require_deps
+  say "${BOLD}source${RST}  $SOURCE_OWNER"
+  say "${BOLD}archive${RST} $ARCHIVE_OWNER"
+  say ""
+
+  local login scopes
+  login=$(gh api user --jq .login)
+  scopes=$(gh api -i user 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower($1)=="x-oauth-scopes"{print $2}')
+  ok "authenticated as ${BOLD}$login${RST}"
+  info "  token scopes: ${scopes:-unknown}"
+
+  if [[ "$login" != "$SOURCE_OWNER" ]]; then
+    warn "logged in as $login but SOURCE_OWNER is $SOURCE_OWNER"
+  fi
+
+  if gh api "orgs/$ARCHIVE_OWNER" --jq .login >/dev/null 2>&1; then
+    ok "archive org ${BOLD}$ARCHIVE_OWNER${RST} exists"
+    local role
+    role=$(gh api "user/memberships/orgs/$ARCHIVE_OWNER" --jq .role 2>/dev/null || echo "unknown")
+    if [[ "$role" == "admin" ]]; then
+      ok "you are an ${BOLD}admin${RST} of it"
+    else
+      warn "your role there is '$role' — transfers need repo-creation rights"
+    fi
+  else
+    warn "archive org $ARCHIVE_OWNER does not exist yet (or you can't see it)"
+    info "  create it free: https://github.com/account/organizations/new?plan=free"
+    return 1
+  fi
+
+  local n
+  n=$(fetch_repos "$SOURCE_OWNER" | jq 'length')
+  say ""
+  say "$n repos under $SOURCE_OWNER"
+}
+
+# -------------------------------------------------------------- cmd: list ----
+
+# Shared renderer: reads a repos JSON array on stdin, prints an aligned table.
+render_table() {
+  jq -r '
+    sort_by(.pushedAt) | .[] |
+    [ .name,
+      (if .isPrivate then "private" else "public" end),
+      (if .isFork then "fork" else "-" end),
+      (.stargazerCount|tostring),
+      (.primaryLanguage.name // "-"),
+      (.pushedAt // "" | split("T")[0]),
+      (.description // "" | gsub("\t"; " ") | .[0:60])
+    ] | @tsv' |
+  awk -F'\t' 'BEGIN{
+      printf "%-32s %-8s %-5s %5s %-12s %-11s %s\n","REPO","VIS","FORK","STARS","LANG","LAST PUSH","DESCRIPTION"
+    }{ printf "%-32s %-8s %-5s %5s %-12s %-11s %s\n",$1,$2,$3,$4,$5,$6,$7 }'
+}
+
+cmd_list() {
+  require_deps
+  local owner="${1:-$SOURCE_OWNER}"
+  fetch_repos "$owner" | render_table
+}
+
+# -------------------------------------------------------- cmd: candidates ----
+
+cmd_candidates() {
+  require_deps
+  local stale="$STALE_DAYS"
+  while (( $# )); do
+    case "$1" in
+      --stale-days) stale="$2"; shift 2 ;;
+      --stale-days=*) stale="${1#*=}"; shift ;;
+      *) die "unknown flag for candidates: $1" ;;
+    esac
+  done
+
+  local cutoff
+  cutoff=$(date -u -v-"${stale}"d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+        || date -u -d "-${stale} days" +%Y-%m-%dT%H:%M:%SZ)
+
+  say "${BOLD}Archive candidates${RST} ${DIM}(no push since ${cutoff%%T*}, under $SOURCE_OWNER)${RST}"
+  say ""
+  fetch_repos "$SOURCE_OWNER" |
+    jq --arg cutoff "$cutoff" '[ .[] | select(.isArchived | not) | select(.pushedAt < $cutoff) ]' |
+    render_table
+  say ""
+  info "Review this list by hand. Anything you still link to, still run, or still"
+  info "care about the URL of is fine to archive — transfers redirect."
+}
+
+# -------------------------------------------------------------- cmd: move ----
+
+transfer_one() {
+  local repo="$1" reason="$2"
+
+  # Refuse to guess: the repo must exist under the source owner.
+  local meta
+  if ! meta=$(gh api "repos/$SOURCE_OWNER/$repo" 2>/dev/null); then
+    warn "$repo: not found under $SOURCE_OWNER — skipping"
+    return 1
+  fi
+
+  if [[ "$(jq -r .archived <<<"$meta")" == "true" ]]; then
+    warn "$repo: already flagged archived on GitHub; unarchive before transferring"
+    return 1
+  fi
+
+  if gh api "repos/$ARCHIVE_OWNER/$repo" >/dev/null 2>&1; then
+    warn "$repo: a repo by that name already exists in $ARCHIVE_OWNER — skipping"
+    return 1
+  fi
+
+  say "${BOLD}$repo${RST} → $ARCHIVE_OWNER/$repo"
+
+  if ! run gh api -X POST "repos/$SOURCE_OWNER/$repo/transfer" \
+        -f new_owner="$ARCHIVE_OWNER" --silent; then
+    warn "$repo: transfer request failed"
+    info "  if this is a permissions error: gh auth refresh -h github.com -s admin:org"
+    return 1
+  fi
+
+  if (( DRY_RUN )); then
+    info "  would wait for transfer, flag archived, record note, repoint remote"
+    return 0
+  fi
+
+  # Transfers are asynchronous (202 Accepted); wait for the new location.
+  local i
+  for i in $(seq 1 30); do
+    gh api "repos/$ARCHIVE_OWNER/$repo" >/dev/null 2>&1 && break
+    sleep 2
+    (( i == 30 )) && { warn "$repo: transfer not visible after 60s — check manually"; return 1; }
+  done
+  ok "transferred"
+
+  if gh api -X PATCH "repos/$ARCHIVE_OWNER/$repo" -F archived=true --silent 2>/dev/null; then
+    ok "flagged read-only archived"
+  else
+    warn "$repo: transferred but could not set the archived flag"
+  fi
+
+  write_note "$repo" "$reason"
+  repoint_remote "$repo"
+}
+
+# Point a local clone at the new URL. GitHub redirects anyway, but a stale
+# remote quietly rewrites itself on the next fetch, which is worse than explicit.
+repoint_remote() {
+  local repo="$1" dir="$CODE_DIR/$repo" url
+  [[ -d "$dir/.git" ]] || return 0
+  url=$(git -C "$dir" remote get-url origin 2>/dev/null || echo "")
+  [[ "$url" == *"$SOURCE_OWNER/$repo"* ]] || return 0
+
+  local new="${url/$SOURCE_OWNER\/$repo/$ARCHIVE_OWNER\/$repo}"
+  run git -C "$dir" remote set-url origin "$new"
+  ok "local clone $dir now points at $ARCHIVE_OWNER/$repo"
+}
+
+cmd_move() {
+  require_deps
+  local reason="" repos=()
+  while (( $# )); do
+    case "$1" in
+      --reason) reason="$2"; shift 2 ;;
+      --reason=*) reason="${1#*=}"; shift ;;
+      --dry-run) DRY_RUN=1; shift ;;
+      -y|--yes) ASSUME_YES=1; shift ;;
+      -*) die "unknown flag for move: $1" ;;
+      *) repos+=("$1"); shift ;;
+    esac
+  done
+  (( ${#repos[@]} )) || die "usage: archive move [--reason TEXT] [--dry-run] [-y] <repo>..."
+
+  say "About to move ${BOLD}${#repos[@]}${RST} repo(s) from $SOURCE_OWNER to $ARCHIVE_OWNER:"
+  printf '  %s\n' "${repos[@]}"
+  say ""
+  (( DRY_RUN )) || confirm "Transfer and archive these?" || die "aborted"
+
+  local moved=0 failed=0
+  for repo in "${repos[@]}"; do
+    if transfer_one "$repo" "$reason"; then (( ++moved )); else (( ++failed )); fi
+    say ""
+  done
+
+  say "${BOLD}$moved moved${RST}, $failed skipped/failed"
+  (( moved && ! DRY_RUN )) && { cmd_index; say ""; info "INDEX.md regenerated — commit it."; }
+  return 0
+}
+
+# -------------------------------------------------------------- cmd: undo ----
+
+cmd_undo() {
+  require_deps
+  local repo="${1:-}"
+  [[ -n "$repo" ]] || die "usage: archive undo <repo>"
+
+  gh api "repos/$ARCHIVE_OWNER/$repo" >/dev/null 2>&1 \
+    || die "$repo is not in $ARCHIVE_OWNER"
+
+  confirm "Move $ARCHIVE_OWNER/$repo back to $SOURCE_OWNER?" || die "aborted"
+
+  # An archived repo is read-only; unarchive before it can be transferred.
+  run gh api -X PATCH "repos/$ARCHIVE_OWNER/$repo" -F archived=false --silent
+  run gh api -X POST "repos/$ARCHIVE_OWNER/$repo/transfer" \
+      -f new_owner="$SOURCE_OWNER" --silent
+  drop_note "$repo"
+  ok "$repo sent back to $SOURCE_OWNER"
+  info "give it a few seconds, then: git remote set-url origin git@github.com:$SOURCE_OWNER/$repo.git"
+  cmd_index
+}
+
+# ------------------------------------------------------------- cmd: index ----
+
+cmd_index() {
+  require_deps
+  local repos count generated
+  repos=$(fetch_repos "$ARCHIVE_OWNER")
+  count=$(jq 'length' <<<"$repos")
+  generated=$(date -u +%Y-%m-%d)
+
+  {
+    echo "# Archive index"
+    echo
+    echo "Read-only repos moved out of [@$SOURCE_OWNER](https://github.com/$SOURCE_OWNER)"
+    echo "into [@$ARCHIVE_OWNER](https://github.com/$ARCHIVE_OWNER). Their original URLs"
+    echo "still redirect here, so old links and clones keep working."
+    echo
+    echo "**$count repos** · regenerated $generated by \`bin/archive index\` — do not edit by hand."
+    echo
+    echo "| Repo | Language | Stars | Last push | Why archived |"
+    echo "| --- | --- | ---: | --- | --- |"
+    jq -r --arg owner "$ARCHIVE_OWNER" '
+      sort_by(.name | ascii_downcase) | .[] |
+      [ .name,
+        (.primaryLanguage.name // "—"),
+        (.stargazerCount | tostring),
+        (.pushedAt // "" | split("T")[0])
+      ] | @tsv' <<<"$repos" |
+    while IFS=$'\t' read -r name lang stars pushed; do
+      local reason; reason=$(read_note "$name")
+      [[ -n "$reason" ]] || reason="—"
+      echo "| [$name](https://github.com/$ARCHIVE_OWNER/$name) | $lang | $stars | $pushed | $reason |"
+    done
+  } > "$INDEX"
+
+  ok "wrote $INDEX ($count repos)"
+}
+
+# -------------------------------------------------------------- cmd: help ----
+
+cmd_help() {
+  cat <<EOF
+${BOLD}archive${RST} — move stale repos into an archive org, without losing anything.
+
+${BOLD}COMMANDS${RST}
+  check                       Verify auth, org access, and config.
+  list [owner]                Table of every repo under an owner, oldest push first.
+  candidates [--stale-days N] Repos that look archivable (default: ${STALE_DAYS}d untouched).
+  move <repo>... [flags]      Transfer to $ARCHIVE_OWNER, flag archived, update the index.
+      --reason TEXT             One-line note recorded in INDEX.md.
+      --dry-run                 Print what would happen; change nothing.
+      -y, --yes                 Skip the confirmation prompt.
+  undo <repo>                  Unarchive and transfer back to $SOURCE_OWNER.
+  index                        Regenerate INDEX.md from the archive org.
+  help                         This.
+
+${BOLD}CONFIG${RST}  $ROOT/.archiverc  (env vars win)
+  SOURCE_OWNER=$SOURCE_OWNER  ARCHIVE_OWNER=$ARCHIVE_OWNER  STALE_DAYS=$STALE_DAYS
+
+${BOLD}NOTES${RST}
+  A transfer keeps history, issues, PRs, stars, and releases, and leaves a
+  permanent redirect at the old URL. It is reversible with \`undo\`.
+  Transfers are not instant; \`move\` polls until the new location resolves.
+EOF
+}
+
+# ------------------------------------------------------------------ main ----
+
+main() {
+  local cmd="${1:-help}"
+  shift || true
+  case "$cmd" in
+    check)                cmd_check "$@" ;;
+    list|ls)              cmd_list "$@" ;;
+    candidates|stale)     cmd_candidates "$@" ;;
+    move|mv)              cmd_move "$@" ;;
+    undo|restore)         cmd_undo "$@" ;;
+    index)                cmd_index "$@" ;;
+    help|-h|--help)       cmd_help ;;
+    *) die "unknown command: $cmd (try 'archive help')" ;;
+  esac
+}
+
+main "$@"
