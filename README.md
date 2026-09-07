@@ -10,7 +10,27 @@ It is reversible.
 
 **[INDEX.md](INDEX.md)** lists everything archived so far and why.
 
-## Use
+## The board
+
+```sh
+./bin/archive ui        # http://127.0.0.1:8787
+```
+
+Two columns — **Keep** on the left, **Archive** on the right — and `<` `>` to
+stage the end shape. Kept repos hold their ink; staged ones drain to grey, so
+the shape of the plan reads without labels. Arrow keys move the selection,
+shift and cmd extend it, `/` jumps to the filter.
+
+Committing streams the transfers one repo at a time. Anything that trips a
+review rule — five or more stars, a live Pages site, open issues from someone
+else, a published package pointing back at it, a protected name — stops and
+waits in the **held** pile with its reasons, while the rest keep moving. Each
+held repo takes *Archive anyway* or *Keep it*.
+
+The board binds to loopback only and shells out to `gh`. It stages into
+`plan.json`; nothing moves until you commit.
+
+## Command line
 
 ```sh
 ./bin/archive check                        # auth, org access, config

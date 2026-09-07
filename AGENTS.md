@@ -15,6 +15,12 @@ with `bin/archive undo <repo>`.
 This is why the bar for archiving is low. The only real cost is that the repo
 becomes read-only and stops appearing on the main profile. That is the point.
 
+## Two ways in
+
+`./bin/archive ui` opens a staging board for a human to shape a plan directly.
+Use it when Nate wants to drive. Everything below is the agent path — same rules,
+same review checks, run from the terminal.
+
 ## Workflow
 
 1. **`./bin/archive check`** — confirms auth, org access, and config. If it
@@ -53,7 +59,7 @@ becomes read-only and stops appearing on the main profile. That is the point.
 
 **Never archive:**
 - `iamnbutler/iamnbutler` (the profile README) or `iamnbutler.github.io`.
-- This repo (`archive`).
+- This repo (`archive`) — it lives in the org but must stay writable.
 - Anything with open issues or PRs from other people — resolve or close first;
   archiving freezes them mid-conversation.
 
@@ -74,6 +80,7 @@ concrete, no filler.
 | `already flagged archived on GitHub` | Archived in place, not moved | Unarchive on GitHub, then re-run `move` |
 | `transfer not visible after 60s` | GitHub is slow, not broken | Wait, then `./bin/archive index` to reconcile |
 | Local clone still points at the old URL | No clone under `CODE_DIR` | `git remote set-url origin <new url>` by hand |
+| A repo is held on the board and never clears | Nobody answered it | Ask Nate for the call; do not decide alone |
 
 Never work around a failed transfer by deleting the source repo. If `move`
 cannot finish, report what happened and leave the repo where it is.

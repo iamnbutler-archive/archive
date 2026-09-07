@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Archive board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#E9EAE6; --card:#FCFCFB; --card-arc:#E1E2DC;
+  --ink:#16181D; --ink-2:#565A63; --taupe:#8B8577;
+  --ultra:#2C3E9E; --plum:#6E2F5B; --rule:#D3D4CD; --rule-2:#C2C3BB;
+  --sans:"Archivo",system-ui,-apple-system,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r:3px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--sans);font-size:13px;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+button{font:inherit;color:inherit;border:none;background:none;cursor:pointer}
+:focus-visible{outline:2px solid var(--ultra);outline-offset:2px}
+
+/* ---------------------------------------------------------------- header */
+.top{
+  flex:none;display:flex;align-items:center;gap:22px;
+  padding:14px 20px;border-bottom:1px solid var(--rule-2);background:var(--card);
+}
+.wordmark{font-weight:800;letter-spacing:-.02em;font-size:15px}
+.route{font-family:var(--mono);font-size:12px;color:var(--ink-2);white-space:nowrap}
+.route b{color:var(--ultra);font-weight:600}
+.route .to{color:var(--taupe);font-weight:600}
+.tally{margin-left:auto;display:flex;gap:18px;font-family:var(--mono);font-size:12px}
+.tally div{color:var(--ink-2)}
+.tally span{font-weight:600;color:var(--ink)}
+.tally .arc span{color:var(--taupe)}
+
+.commit{
+  background:var(--ultra);color:#fff;font-weight:600;font-size:12px;
+  letter-spacing:.02em;padding:8px 16px;border-radius:var(--r);
+}
+.commit:disabled{background:var(--rule-2);color:#fff;cursor:not-allowed}
+.commit.stop{background:var(--plum)}
+
+/* progress hairline under the header while a run is live */
+.bar{flex:none;height:2px;background:var(--rule);display:none}
+.bar.on{display:block}
+.bar i{display:block;height:100%;width:0;background:var(--ultra);transition:width .3s ease}
+
+/* ---------------------------------------------------------------- board */
+.board{flex:1;display:grid;grid-template-columns:1fr 52px 1fr;min-height:0}
+.col{display:flex;flex-direction:column;min-height:0;min-width:0}
+.col-head{
+  flex:none;display:flex;align-items:baseline;gap:10px;
+  padding:13px 18px 10px;border-bottom:1px solid var(--rule);
+}
+.col-head h2{
+  margin:0;font-size:11px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;
+}
+.col-head .n{font-family:var(--mono);font-size:12px;color:var(--ink-2)}
+.col-head .where{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--taupe)}
+.keep .col-head h2{color:var(--ultra)}
+.arc  .col-head h2{color:var(--taupe)}
+.arc{background:color-mix(in srgb,var(--paper) 84%,#B9BAB2)}
+
+.find{flex:none;padding:9px 18px;border-bottom:1px solid var(--rule)}
+.find input{
+  width:100%;font-family:var(--mono);font-size:12px;color:var(--ink);
+  padding:6px 9px;border:1px solid var(--rule-2);border-radius:var(--r);
+  background:var(--card);
+}
+.find input::placeholder{color:var(--taupe)}
+.arc .find input{background:transparent}
+
+.list{flex:1;overflow-y:auto;padding:8px 10px 40px;scrollbar-width:thin}
+
+/* --------------------------------------------------------------- a repo */
+.row{
+  display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:baseline;
+  padding:7px 9px;border-radius:var(--r);cursor:default;border:1px solid transparent;
+}
+.row + .row{margin-top:1px}
+.row .name{font-family:var(--mono);font-size:12.5px;font-weight:500}
+.row .facts{font-family:var(--mono);font-size:11px;color:var(--ink-2);white-space:nowrap}
+.row .desc{
+  grid-column:1/-1;font-size:11.5px;color:var(--ink-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.row:hover{background:color-mix(in srgb,var(--card) 60%,transparent)}
+.row[aria-selected="true"]{background:var(--card);border-color:var(--rule-2)}
+
+/* the whole point: kept repos keep their ink, archived ones are drained */
+.keep .row .name{color:var(--ink)}
+.keep .row[aria-selected="true"]{
+  border-color:var(--ultra);box-shadow:inset 2px 0 0 var(--ultra);
+}
+.arc .row{opacity:.86}
+.arc .row .name,.arc .row .facts,.arc .row .desc{color:var(--taupe)}
+.arc .row[aria-selected="true"]{opacity:1;border-color:var(--taupe);background:var(--card-arc)}
+.row .star{color:var(--ultra);font-weight:600}
+.arc .row .star{color:var(--taupe)}
+
+/* -------------------------------------------------------------- the rail */
+.rail{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  border-left:1px solid var(--rule);border-right:1px solid var(--rule);
+  background:var(--card);
+}
+.rail button{
+  width:34px;height:34px;border:1px solid var(--rule-2);border-radius:var(--r);
+  font-family:var(--mono);font-size:15px;line-height:1;color:var(--ink-2);
+  display:grid;place-items:center;background:var(--card);
+}
+.rail button:hover:not(:disabled){border-color:var(--ultra);color:var(--ultra)}
+.rail button:disabled{opacity:.3;cursor:not-allowed}
+.rail .hint{
+  font-family:var(--mono);font-size:9.5px;color:var(--taupe);
+  writing-mode:vertical-rl;margin-top:10px;letter-spacing:.08em;
+}
+
+/* ------------------------------------------------------------ run states */
+.row .chip{
+  grid-column:2;font-family:var(--mono);font-size:10px;font-weight:600;
+  letter-spacing:.06em;text-transform:uppercase;
+}
+.row[data-state="queued"]   .chip{color:var(--taupe)}
+.row[data-state="checking"] .chip{color:var(--ink-2)}
+.row[data-state="moving"]   .chip{color:var(--ultra)}
+.row[data-state="moved"]    .chip{color:var(--taupe)}
+.row[data-state="failed"]   .chip{color:#9B3126}
+.row[data-state="kept"]     .chip{color:var(--ultra)}
+.row[data-state="moving"]{background:var(--card);opacity:1}
+.row[data-state="moved"]{opacity:.5}
+.row[data-state="moved"] .name{text-decoration:line-through;text-decoration-color:var(--rule-2)}
+.row[data-state="failed"]{background:#F6E9E7;opacity:1}
+.row[data-state="failed"] .name,.row[data-state="failed"] .desc{color:#9B3126}
+@media (prefers-reduced-motion:no-preference){
+  .row[data-state="moving"]{animation:pulse 1.1s ease-in-out infinite}
+}
+@keyframes pulse{50%{background:color-mix(in srgb,var(--ultra) 7%,var(--card))}}
+
+/* ------------------------------------------------------------- held pile */
+.held{flex:none;border-bottom:1px solid var(--rule-2);background:var(--card);max-height:46%;overflow-y:auto}
+.held:empty{display:none}
+.held-head{
+  position:sticky;top:0;background:var(--plum);color:#fff;padding:7px 18px;
+  font-size:10.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;
+}
+.hitem{padding:12px 18px;border-bottom:1px solid var(--rule)}
+.hitem .name{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--plum)}
+.hitem ul{margin:7px 0 10px;padding-left:16px}
+.hitem li{font-size:12px;color:var(--ink-2);margin:3px 0;line-height:1.45}
+.hitem .acts{display:flex;gap:8px}
+.hitem .acts button{
+  font-size:11.5px;font-weight:600;padding:6px 12px;border-radius:var(--r);
+  border:1px solid var(--rule-2);
+}
+.hitem .acts .go{background:var(--plum);color:#fff;border-color:var(--plum)}
+.hitem .acts .no{color:var(--ultra);border-color:var(--ultra)}
+
+/* --------------------------------------------------------------- dialog */
+dialog{
+  border:1px solid var(--rule-2);border-radius:var(--r);padding:0;
+  background:var(--card);color:var(--ink);max-width:440px;width:90vw;
+}
+dialog::backdrop{background:rgba(22,24,29,.36)}
+.dlg{padding:22px}
+.dlg h3{margin:0 0 6px;font-size:15px;font-weight:800;letter-spacing:-.01em}
+.dlg p{margin:0 0 16px;font-size:12.5px;color:var(--ink-2);line-height:1.5}
+.dlg label{display:block;font-size:10.5px;font-weight:800;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--ink-2);margin-bottom:6px}
+.dlg input{
+  width:100%;font-family:var(--mono);font-size:12.5px;padding:8px 10px;
+  border:1px solid var(--rule-2);border-radius:var(--r);background:var(--paper);color:var(--ink);
+}
+.dlg .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.dlg .acts button{font-size:12px;font-weight:600;padding:8px 15px;border-radius:var(--r)}
+.dlg .acts .cancel{color:var(--ink-2)}
+.dlg .acts .ok{background:var(--ultra);color:#fff}
+
+.empty{padding:26px 18px;font-size:12px;color:var(--taupe);font-family:var(--mono)}
+.loading{display:grid;place-items:center;height:100%;font-family:var(--mono);color:var(--taupe)}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wordmark">Archive board</div>
+  <div class="route"><b id="r-src">—</b> <span style="color:var(--rule-2)">→</span> <span class="to" id="r-arc">—</span></div>
+  <div class="tally">
+    <div>keep <span id="t-keep">0</span></div>
+    <div class="arc">archive <span id="t-arc">0</span></div>
+  </div>
+  <button class="commit" id="commit" disabled>Commit plan</button>
+</header>
+<div class="bar" id="bar"><i></i></div>
+
+<main class="board" id="board">
+  <div class="loading">reading repos from github…</div>
+</main>
+
+<template id="tpl-board">
+  <section class="col keep">
+    <div class="col-head">
+      <h2>Keep</h2><span class="n" id="n-keep"></span>
+      <span class="where" id="w-keep"></span>
+    </div>
+    <div class="find"><input id="f-keep" type="search" placeholder="filter kept repos" aria-label="Filter kept repos"></div>
+    <div class="list" id="l-keep" role="listbox" aria-multiselectable="true" tabindex="0"></div>
+  </section>
+
+  <div class="rail">
+    <button id="to-arc" title="Move selection to Archive (→)" aria-label="Move selection to Archive">›</button>
+    <button id="to-keep" title="Move selection to Keep (←)" aria-label="Move selection to Keep">‹</button>
+    <div class="hint">stage the end shape</div>
+  </div>
+
+  <section class="col arc">
+    <div class="col-head">
+      <h2>Archive</h2><span class="n" id="n-arc"></span>
+      <span class="where" id="w-arc"></span>
+    </div>
+    <div class="held" id="held"></div>
+    <div class="find"><input id="f-arc" type="search" placeholder="filter repos to archive" aria-label="Filter repos to archive"></div>
+    <div class="list" id="l-arc" role="listbox" aria-multiselectable="true" tabindex="0"></div>
+  </section>
+</template>
+
+<dialog id="dlg">
+  <form method="dialog" class="dlg">
+    <h3>Commit the plan</h3>
+    <p id="dlg-body"></p>
+    <label for="reason">Why these are being archived</label>
+    <input id="reason" name="reason" placeholder="2013–2016 coursework" autocomplete="off">
+    <div class="acts">
+      <button class="cancel" value="cancel" type="submit">Cancel</button>
+      <button class="ok" value="go" type="submit">Start moving</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+let S = null;                       // server state
+let meta = {};                      // repo -> repo metadata
+let keep = [], arc = [];            // staged plan, arrays of repo names
+let sel = {keep:new Set(), arc:new Set()};
+let lastClick = {keep:null, arc:null};
+let run = {active:false, items:{}}; // live run status
+
+const RUNNING = () => run.active;
+
+// ---------------------------------------------------------------- loading
+async function boot(){
+  S = await (await fetch('/api/state')).json();
+  meta = Object.fromEntries(S.repos.map(r => [r.name, r]));
+  $('#r-src').textContent = '@' + S.source;
+  $('#r-arc').textContent = '@' + S.archive;
+
+  const names = S.repos.map(r => r.name);
+  const planned = new Set([...(S.plan.keep||[]), ...(S.plan.archive||[])]);
+  arc  = (S.plan.archive||[]).filter(n => names.includes(n));
+  keep = (S.plan.keep||[]).filter(n => names.includes(n))
+           .concat(names.filter(n => !planned.has(n)));
+
+  $('#board').replaceChildren($('#tpl-board').content.cloneNode(true));
+  wire();
+  render();
+  listen();
+}
+
+// ---------------------------------------------------------------- render
+const byPush = (a,b) => (meta[a].pushedAt||'') < (meta[b].pushedAt||'') ? -1 : 1;
+
+function row(name, side){
+  const m = meta[name], d = document.createElement('div');
+  const st = run.items[name];
+  d.className = 'row';
+  d.dataset.name = name;
+  d.setAttribute('role','option');
+  d.setAttribute('aria-selected', sel[side].has(name));
+  if (st) d.dataset.state = st.state;
+
+  const facts = [];
+  if (m.stargazerCount) facts.push(`<span class="star">${m.stargazerCount}★</span>`);
+  if (m.isFork) facts.push('fork');
+  if (m.primaryLanguage) facts.push(m.primaryLanguage.name);
+  facts.push((m.pushedAt||'').slice(0,7));
+
+  d.innerHTML =
+    `<div class="name">${name}</div>` +
+    (st ? `<div class="chip">${st.state}</div>`
+        : `<div class="facts">${facts.join(' · ')}</div>`) +
+    `<div class="desc">${st && st.note ? st.note : (m.description||'')}</div>`;
+
+  d.addEventListener('click', e => pick(e, name, side));
+  return d;
+}
+
+function paint(side){
+  const list = side === 'keep' ? keep : arc;
+  const el = side === 'keep' ? $('#l-keep') : $('#l-arc');
+  const q = (side === 'keep' ? $('#f-keep') : $('#f-arc')).value.trim().toLowerCase();
+  const shown = list.slice().sort(byPush)
+    .filter(n => !q || n.toLowerCase().includes(q) ||
+                 (meta[n].description||'').toLowerCase().includes(q));
+  el.replaceChildren(...shown.map(n => row(n, side)));
+  if (!shown.length){
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.textContent = q ? 'nothing matches' : 'empty';
+    el.append(e);
+  }
+  const n = side === 'keep' ? '#n-keep' : '#n-arc';
+  $(n).textContent = q ? `${shown.length}/${list.length}` : list.length;
+}
+
+function render(){
+  paint('keep'); paint('arc');
+  $('#t-keep').textContent = keep.length;
+  $('#t-arc').textContent = arc.length;
+  $('#w-keep').textContent = '@' + S.source;
+  $('#w-arc').textContent = '@' + S.archive;
+  $('#to-arc').disabled = RUNNING() || !sel.keep.size;
+  $('#to-keep').disabled = RUNNING() || !sel.arc.size;
+  const c = $('#commit');
+  c.disabled = RUNNING() || !arc.length;
+  c.textContent = RUNNING() ? 'Moving…' : `Commit plan · ${arc.length}`;
+  savePlan();
+}
+
+// ------------------------------------------------------------- selection
+function pick(e, name, side){
+  if (RUNNING()) return;
+  const list = (side==='keep'?keep:arc).slice().sort(byPush);
+  const s = sel[side];
+  if (e.shiftKey && lastClick[side]){
+    const a = list.indexOf(lastClick[side]), b = list.indexOf(name);
+    list.slice(Math.min(a,b), Math.max(a,b)+1).forEach(n => s.add(n));
+  } else if (e.metaKey || e.ctrlKey){
+    s.has(name) ? s.delete(name) : s.add(name);
+  } else {
+    s.clear(); s.add(name);
+  }
+  lastClick[side] = name;
+  render();
+}
+
+function shift(from){
+  const to = from === 'keep' ? 'arc' : 'keep';
+  const moving = [...sel[from]];
+  if (!moving.length) return;
+  if (from === 'keep') { keep = keep.filter(n=>!sel.keep.has(n)); arc = arc.concat(moving); }
+  else                 { arc  = arc.filter(n=>!sel.arc.has(n));   keep = keep.concat(moving); }
+  sel[from].clear();
+  sel[to] = new Set(moving);
+  render();
+}
+
+let saveT;
+function savePlan(){
+  clearTimeout(saveT);
+  saveT = setTimeout(() => fetch('/api/plan', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({keep, archive: arc})}), 400);
+}
+
+// ------------------------------------------------------------------ wire
+function wire(){
+  $('#to-arc').onclick  = () => shift('keep');
+  $('#to-keep').onclick = () => shift('arc');
+  $('#f-keep').oninput  = () => paint('keep');
+  $('#f-arc').oninput   = () => paint('arc');
+  $('#commit').onclick  = commit;
+
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') { if (e.key === 'Escape') e.target.blur(); return; }
+    if (RUNNING()) return;
+    if (e.key === '/'){ e.preventDefault(); $('#f-keep').focus(); }
+    if (e.key === 'ArrowRight' || e.key === '>') shift('keep');
+    if (e.key === 'ArrowLeft'  || e.key === '<') shift('arc');
+  });
+}
+
+// -------------------------------------------------------------- commit
+async function commit(){
+  const protectedHits = arc.filter(n => S.protected.includes(n));
+  $('#dlg-body').textContent =
+    `${arc.length} repos transfer to @${S.archive} and become read-only. Their ` +
+    `old URLs keep redirecting, and anything that trips a review rule stops for ` +
+    `your call instead of moving.` +
+    (protectedHits.length ? ` ${protectedHits.join(', ')} will be refused.` : '');
+  $('#dlg').showModal();
+  $('#reason').focus();
+  $('#dlg').addEventListener('close', async function once(){
+    $('#dlg').removeEventListener('close', once);
+    if ($('#dlg').returnValue !== 'go') return;
+    run.active = true;
+    $('#bar').classList.add('on');
+    render();
+    await fetch('/api/run', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({archive: arc, reason: $('#reason').value.trim()})});
+  });
+}
+
+// -------------------------------------------------------------- the run
+function listen(){
+  const es = new EventSource('/api/events');
+  es.onmessage = e => {
+    const ev = JSON.parse(e.data);
+    if (ev.type === 'snapshot'){
+      run.active = ev.active;
+      ev.items.forEach(i => run.items[i.repo] = i);
+    }
+    if (ev.type === 'item') run.items[ev.item.repo] = ev.item;
+    if (ev.type === 'done'){ run.active = false; $('#bar').classList.remove('on'); }
+    sync();
+  };
+}
+
+function sync(){
+  const items = Object.values(run.items);
+  const done = items.filter(i => ['moved','failed','kept'].includes(i.state)).length;
+  if (items.length) $('#bar').firstElementChild.style.width = (done/items.length*100)+'%';
+
+  const held = items.filter(i => i.state === 'held');
+  $('#held').replaceChildren(...(held.length ? [heldHead(held.length), ...held.map(heldItem)] : []));
+  render();
+}
+
+function heldHead(n){
+  const h = document.createElement('div');
+  h.className = 'held-head';
+  h.textContent = `${n} held for review`;
+  return h;
+}
+
+function heldItem(i){
+  const d = document.createElement('div');
+  d.className = 'hitem';
+  d.innerHTML = `<div class="name">${i.repo}</div><ul>` +
+    i.flags.map(f => `<li>${f}</li>`).join('') + `</ul>`;
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  const go = document.createElement('button');
+  go.className = 'go'; go.textContent = 'Archive anyway';
+  go.onclick = () => decide(i.repo, 'archive');
+  const no = document.createElement('button');
+  no.className = 'no'; no.textContent = 'Keep it';
+  no.onclick = () => decide(i.repo, 'keep');
+  acts.append(go, no);
+  d.append(acts);
+  return d;
+}
+
+function decide(repo, action){
+  if (action === 'keep'){ arc = arc.filter(n => n !== repo); keep.push(repo); }
+  fetch('/api/decide', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({repo, action})});
+}
+
+boot();
+</script>
+</body>
+</html>
